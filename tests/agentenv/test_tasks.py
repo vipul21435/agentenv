@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agentenv.env import Environment, PythonAction, ShellAction
+from agentenv.env import Environment, PythonAction, ShellAction, WriteFileAction
 from agentenv.errors import TaskError
 from agentenv.sandbox import SubprocessSandbox
 from agentenv.tasks import _SLUG_BUGS, TASKS, get_task, list_tasks
@@ -224,3 +224,18 @@ def test_shell_reference_solutions_run_through_the_environment(tmp_path: Path) -
         task = get_task(task_id)
         assert all(isinstance(action, ShellAction) for action in task.reference_solution(0))
         assert _run_reference(task_id, 0, tmp_path) == 1.0
+
+
+@pytest.mark.parametrize(
+    ("task_id", "module"),
+    [("fix_checksum", "mathlib.py"), ("fix_slugify", "textutil.py"), ("implement_ringbuffer", "ringbuffer.py")],
+)
+def test_hidden_tests_reject_module_that_exits_cleanly_at_import(task_id: str, module: str, tmp_path: Path) -> None:
+    """A module that calls os._exit(0) on import must not pass by skipping the assertions."""
+    with Environment(get_task(task_id), workspace_root=tmp_path) as env:
+        env.reset(1)
+        result = env.step(WriteFileAction(path=module, content="import os\nos._exit(0)\n"))
+        assert result.reward == 0.0
+        env.reset(1)
+        result = env.step(WriteFileAction(path=module, content="import sys\nsys.exit(0)\n"))
+        assert result.reward == 0.0

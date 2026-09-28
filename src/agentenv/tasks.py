@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import random
 import re
+import secrets
 import statistics
 from collections import Counter
 from collections.abc import Callable
@@ -114,6 +115,19 @@ def _checksum_setup(workspace: Path, seed: int) -> None:
     )
 
 
+def _hidden_tests_pass(sandbox: SubprocessSandbox, code: str) -> bool:
+    """True only when ``code`` runs to its last line with every assertion intact.
+
+    The grader script imports the agent's module first, so a module that exits
+    cleanly at import (``os._exit(0)``) would otherwise skip every assertion and
+    still return 0. A sentinel chosen per call is printed as the final statement
+    and must appear on stdout in addition to the zero exit status.
+    """
+    sentinel = "AGENTENV_HIDDEN_TESTS_OK_" + secrets.token_hex(16)
+    result = sandbox.python(code + f"print({sentinel!r})\n")
+    return result.ok and sentinel in result.stdout
+
+
 def _checksum_reward(sandbox: SubprocessSandbox, seed: int) -> float:
     modulus, _, cases, _ = _checksum_params(seed)
     checks = [(values, _checksum_expected(values, modulus)) for values in cases]
@@ -122,7 +136,7 @@ def _checksum_reward(sandbox: SubprocessSandbox, seed: int) -> float:
         f"for values, expected in {checks!r}:\n"
         "    assert weighted_checksum(values) == expected, (values, expected)\n"
     )
-    return 1.0 if sandbox.python(code).ok else 0.0
+    return 1.0 if _hidden_tests_pass(sandbox, code) else 0.0
 
 
 def _checksum_reference(seed: int) -> list[Action]:
@@ -321,7 +335,7 @@ def _slug_reward(sandbox: SubprocessSandbox, seed: int) -> float:
         f"for text, expected in {checks!r}:\n"
         "    assert slugify(text) == expected, (text, expected, slugify(text))\n"
     )
-    return 1.0 if sandbox.python(code).ok else 0.0
+    return 1.0 if _hidden_tests_pass(sandbox, code) else 0.0
 
 
 def _slug_reference(seed: int) -> list[Action]:
@@ -375,7 +389,7 @@ def _ring_reward(sandbox: SubprocessSandbox, seed: int) -> float:
         "        assert buffer.items() == expected, (buffer.items(), expected)\n"
         "        assert len(buffer) == len(expected)\n"
     )
-    return 1.0 if sandbox.python(code).ok else 0.0
+    return 1.0 if _hidden_tests_pass(sandbox, code) else 0.0
 
 
 _RING_SOLUTION = '''"""Fixed-capacity FIFO buffer."""
