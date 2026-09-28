@@ -7,12 +7,24 @@ from pathlib import Path
 
 import pytest
 
-from agentenv.env import Environment
+from agentenv.env import Environment, PythonAction, ShellAction
 from agentenv.errors import TaskError
 from agentenv.sandbox import SubprocessSandbox
-from agentenv.tasks import TASKS, get_task, list_tasks
+from agentenv.tasks import _SLUG_BUGS, TASKS, get_task, list_tasks
 
 SEEDS = [0, 1, 2, 42]
+TASK_IDS = [
+    "fix_checksum",
+    "summarize_numbers",
+    "parse_log",
+    "fix_slugify",
+    "implement_ringbuffer",
+    "csv_totals",
+    "json_flatten",
+    "grep_report",
+    "rename_files",
+    "data_pipeline",
+]
 
 
 def _run_reference(task_id: str, seed: int, root: Path) -> float:
@@ -47,7 +59,7 @@ def test_setup_is_deterministic_per_seed(task_id: str, tmp_path: Path) -> None:
         workspace = tmp_path / f"{seed}-{len(snapshots)}"
         workspace.mkdir()
         task.setup(workspace, seed)
-        snapshots.append({p.name: p.read_text() for p in workspace.iterdir()})
+        snapshots.append({str(p.relative_to(workspace)): p.read_text() for p in workspace.rglob("*") if p.is_file()})
     assert snapshots[0] == snapshots[1]
     assert snapshots[0] != snapshots[2]
     assert "TASK.md" in snapshots[0]
@@ -87,7 +99,128 @@ def test_log_summary_keys(tmp_path: Path) -> None:
 
 
 def test_registry() -> None:
-    assert [t.id for t in list_tasks()] == ["fix_checksum", "summarize_numbers", "parse_log"]
+    assert [t.id for t in list_tasks()] == TASK_IDS
+    assert len(TASK_IDS) >= 10
     with pytest.raises(TaskError) as excinfo:
         get_task("nope")
     assert excinfo.value.details["available"] == sorted(TASKS)
+
+
+def _prepared(task_id: str, seed: int, root: Path) -> SubprocessSandbox:
+    sandbox = SubprocessSandbox.create(root=root)
+    get_task(task_id).setup(sandbox.workspace, seed)
+    return sandbox
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_slugify_bug_variant_fails_and_every_variant_is_caught(seed: int, tmp_path: Path) -> None:
+    task = get_task("fix_slugify")
+    sandbox = _prepared("fix_slugify", seed, tmp_path)
+    source = (sandbox.workspace / "textutil.py").read_text()
+    assert sandbox.python("import textutil").ok
+    assert task.reward(sandbox, seed) == 0.0
+    for bug in _SLUG_BUGS:
+        limit = int(source.split("at most ")[1].split()[0])
+        body = bug.format(limit=limit)
+        (sandbox.workspace / "textutil.py").write_text(source.split("    return ")[0] + f"    return {body}\n")
+        assert task.reward(sandbox, seed) == 0.0, bug
+
+
+def test_ringbuffer_rejects_wrong_eviction_order(tmp_path: Path) -> None:
+    task = get_task("implement_ringbuffer")
+    sandbox = _prepared("implement_ringbuffer", 1, tmp_path)
+    (sandbox.workspace / "ringbuffer.py").write_text(
+        "class RingBuffer:\n"
+        "    def __init__(self, capacity):\n"
+        "        if capacity < 1:\n"
+        "            raise ValueError\n"
+        "        self.capacity, self._items = capacity, []\n"
+        "    def push(self, item):\n"
+        "        if len(self._items) < self.capacity:\n"
+        "            self._items.append(item)\n"  # drops the newest instead of the oldest
+        "    def items(self):\n"
+        "        return list(self._items)\n"
+        "    def __len__(self):\n"
+        "        return len(self._items)\n"
+    )
+    assert task.reward(sandbox, 1) == 0.0
+
+
+def test_csv_totals_partial_credit_and_tolerance(tmp_path: Path) -> None:
+    task = get_task("csv_totals")
+    sandbox = _prepared("csv_totals", 0, tmp_path)
+    for action in task.reference_solution(0):
+        assert isinstance(action, PythonAction)
+        assert sandbox.python(action.code).ok
+    totals = json.loads((sandbox.workspace / "totals.json").read_text())
+    assert len(totals) >= 3
+    first = next(iter(totals))
+    totals[first] += 0.004  # inside the half-cent tolerance
+    (sandbox.workspace / "totals.json").write_text(json.dumps(totals))
+    assert task.reward(sandbox, 0) == 1.0
+    totals[first] += 1.0
+    (sandbox.workspace / "totals.json").write_text(json.dumps(totals))
+    assert task.reward(sandbox, 0) == pytest.approx((len(totals) - 1) / len(totals))
+
+
+def test_json_flatten_keys_are_dotted_paths(tmp_path: Path) -> None:
+    task = get_task("json_flatten")
+    sandbox = _prepared("json_flatten", 2, tmp_path)
+    config = json.loads((sandbox.workspace / "config.json").read_text())
+    for action in task.reference_solution(2):
+        assert isinstance(action, PythonAction)
+        assert sandbox.python(action.code).ok
+    flat = json.loads((sandbox.workspace / "flat.json").read_text())
+    assert flat["version"] == config["version"]
+    assert all(not isinstance(value, dict) for value in flat.values())
+    assert any("." in key for key in flat)
+    (sandbox.workspace / "flat.json").write_text(json.dumps({"version": config["version"]}))
+    assert 0.0 < task.reward(sandbox, 2) < 0.5
+
+
+def test_grep_report_partial_credit_is_jaccard(tmp_path: Path) -> None:
+    task = get_task("grep_report")
+    sandbox = _prepared("grep_report", 0, tmp_path)
+    assert task.reward(sandbox, 0) == 0.0
+    assert sandbox.shell("grep -rc TODO src docs | grep -v ':0$' | sort > report.txt").ok
+    expected = (sandbox.workspace / "report.txt").read_text().splitlines()
+    assert expected and all(":" in line for line in expected)
+    (sandbox.workspace / "report.txt").write_text("\n".join(expected[:1] + ["bogus.py:9"]) + "\n")
+    assert task.reward(sandbox, 0) == pytest.approx(1 / (len(expected) + 1))
+    (sandbox.workspace / "report.txt").write_text("\n".join(expected) + "\n")
+    assert task.reward(sandbox, 0) == 1.0
+
+
+def test_rename_files_needs_every_tmp_gone(tmp_path: Path) -> None:
+    task = get_task("rename_files")
+    sandbox = _prepared("rename_files", 3, tmp_path)
+    tmp_files = sorted((sandbox.workspace / "incoming").glob("*.tmp"))
+    others = {p.name for p in (sandbox.workspace / "incoming").iterdir()} - {p.name for p in tmp_files}
+    assert tmp_files
+    first = tmp_files[0]
+    first.with_suffix(".dat").write_text(first.read_text())  # copied, not moved: the .tmp remains
+    assert task.reward(sandbox, 3) == pytest.approx(1 / (len(tmp_files) + 1))
+    first.unlink()
+    for path in tmp_files[1:]:
+        path.rename(path.with_suffix(".dat"))
+    assert task.reward(sandbox, 3) == 1.0
+    assert others <= {p.name for p in (sandbox.workspace / "incoming").iterdir()}
+
+
+def test_data_pipeline_gives_one_third_per_stage(tmp_path: Path) -> None:
+    task = get_task("data_pipeline")
+    with Environment(task, workspace_root=tmp_path) as env:
+        env.reset(4)
+        rewards = [env.step(action).reward for action in task.reference_solution(4)]
+        assert rewards == pytest.approx([1 / 3, 2 / 3, 1.0])
+        summary = json.loads((env.sandbox.workspace / "summary.json").read_text())
+        merged = (env.sandbox.workspace / "merged.csv").read_text().splitlines()
+    assert summary["rows"] + summary["dropped"] == len(merged) - 1
+    assert summary["dropped"] >= 1
+
+
+def test_shell_reference_solutions_run_through_the_environment(tmp_path: Path) -> None:
+    for task_id in ("grep_report", "rename_files"):
+        task = get_task(task_id)
+        assert all(isinstance(action, ShellAction) for action in task.reference_solution(0))
+        assert _run_reference(task_id, 0, tmp_path) == 1.0

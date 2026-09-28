@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from agentenv import __version__
 from agentenv.cli import EXIT_CONFIG, EXIT_PROBLEMS, app
 from agentenv.doctor import DockerProbe
+from agentenv.tasks import TASKS
 
 runner = CliRunner()
 
@@ -107,11 +108,8 @@ def test_python_module_entry_point() -> None:
 def test_tasks_command_lists_the_suite() -> None:
     result = runner.invoke(app, ["tasks"])
     assert result.exit_code == 0
-    assert [line.split()[0] for line in result.stdout.splitlines()] == [
-        "fix_checksum",
-        "summarize_numbers",
-        "parse_log",
-    ]
+    assert [line.split()[0] for line in result.stdout.splitlines()] == list(TASKS)
+    assert len(TASKS) >= 10
 
 
 def test_run_and_report_commands(tmp_path: Path) -> None:
