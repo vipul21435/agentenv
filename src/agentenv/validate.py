@@ -111,12 +111,15 @@ def _reference_run(env: Environment, seed: int, repeat: int) -> tuple[CheckRun, 
     ), digest
 
 
-def _baseline_run(env: Environment, seed: int, repeat: int) -> CheckRun:
+def _baseline_run(env: Environment, seed: int, repeat: int) -> tuple[CheckRun, str]:
     env.reset(seed)
+    digest = workspace_digest(env.sandbox.workspace)
     result = env.step(ShellAction(command="true"))
     ok = result.reward == 0.0
     detail = "" if ok else f"untouched workspace scored {result.reward:.3f}"
-    return CheckRun(kind="baseline", seed=seed, repeat=repeat, ok=ok, reward=result.reward, steps=1, detail=detail)
+    return CheckRun(
+        kind="baseline", seed=seed, repeat=repeat, ok=ok, reward=result.reward, steps=1, detail=detail
+    ), digest
 
 
 def _verdict(runs: Iterable[CheckRun]) -> Verdict:
@@ -138,12 +141,13 @@ def validate_task(
     runs: list[CheckRun] = []
     with Environment(task, limits=limits, workspace_root=workspace_root) as env:
         for seed in seeds:
-            digests: list[str] = []
+            digests: list[str] = []  # one per reset: 2 x repeats, so never vacuous at repeats=1
             for repeat in range(repeats):
                 reference, digest = _reference_run(env, seed, repeat)
                 runs.append(reference)
-                runs.append(_baseline_run(env, seed, repeat))
-                digests.append(digest)
+                baseline, baseline_digest = _baseline_run(env, seed, repeat)
+                runs.append(baseline)
+                digests.extend((digest, baseline_digest))
             same = len(set(digests)) == 1
             runs.append(
                 CheckRun(
@@ -153,7 +157,7 @@ def validate_task(
                     ok=same,
                     reward=0.0,
                     steps=0,
-                    detail="" if same else f"setup differed across {len(digests)} repeats",
+                    detail="" if same else f"setup differed across {len(digests)} resets",
                 )
             )
     checks: dict[CheckKind, Verdict] = {}

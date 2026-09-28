@@ -105,7 +105,20 @@ def test_nondeterministic_setup_fails(tmp_path: Path) -> None:
     verdict = validate_task(_task("drift", setup=drifting_setup), seeds=[0], repeats=2, workspace_root=tmp_path)
     assert verdict.checks["setup"] == "fail"
     assert verdict.verdict == "fail"
-    assert "setup differed across 2 repeats" in verdict.failures[0].detail
+    assert "setup differed across 4 resets" in verdict.failures[0].detail
+
+
+def test_nondeterministic_setup_fails_at_one_repeat(tmp_path: Path) -> None:
+    """The default --repeats 1 still compares two resets per seed (reference and baseline)."""
+    counter: list[int] = []
+
+    def drifting_setup(workspace: Path, seed: int) -> None:
+        counter.append(1)
+        (workspace / "TASK.md").write_text(f"run {len(counter)}\n")
+
+    verdict = validate_task(_task("drift", setup=drifting_setup), seeds=[0, 1], repeats=1, workspace_root=tmp_path)
+    assert verdict.checks["setup"] == "fail"
+    assert "setup differed across 2 resets" in verdict.failures[0].detail
 
 
 def test_reference_that_raises_sandbox_error_is_a_failure(tmp_path: Path) -> None:

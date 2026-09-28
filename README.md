@@ -147,7 +147,8 @@ with Environment(get_task("parse_log")) as env:
 Every task is checked in `tests/agentenv/test_tasks.py` on four seeds: the reference
 solution scores 1.0, the untouched workspace scores 0.0, and setup is byte-identical for
 the same seed and different across seeds. `agentenv validate-tasks` repeats the same
-check at runtime through the real environment (`tests/agentenv/test_validate.py` proves
+check at runtime through the real environment (the setup check compares the digests of
+every reset it makes, two per seed and repeat, so it is not vacuous at `--repeats 1`) (`tests/agentenv/test_validate.py` proves
 it catches a broken reference, a reward that is too easy, a flaky reward and a
 non-deterministic setup).
 
