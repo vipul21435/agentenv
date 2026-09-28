@@ -35,7 +35,8 @@ Cross-checked against `git log --author=vipul21435@iiitd.ac.in --oneline`.
 - Agents, trajectories and CLI: `ScriptedAgent` (replays the reference solution) and
   `RandomAgent` (seeded random actions), a flushed JSONL `TrajectoryWriter`, a reader with
   line-numbered errors, a per-(task, agent) report, `run_episode` / `run_suite`, and
-  `agentenv tasks | run | report`.
+  `agentenv tasks | run | report` (per (task, agent) rows plus per-agent totals over all
+  tasks with the mean action time).
 - `make demo`, a digest-pinned non-root `Dockerfile`, `docker-compose.yml` (no network,
   CPU and memory limits) and this README.
 - Task suite and validator: seven more original tasks (buggy function vs hidden tests,
@@ -91,7 +92,7 @@ runs the same demo as a non-root user inside `python:3.12-slim`, or `docker comp
 | --- | --- |
 | `agentenv tasks` | List the built-in tasks with `max_steps` and a one-line description. |
 | `agentenv run --task <id,id\|all> --agent scripted --agent random --episodes N --seed S --out FILE` | Run every named agent on every selected task for `N` episodes (seeds `S`..`S+N-1`), write one JSON line per step to `FILE` and print the report. Default: `all`, `scripted`, 1 episode, seed 0, `trajectories.jsonl`. |
-| `agentenv report FILE [--json]` | Success rate, mean steps and mean final reward per (task, agent). |
+| `agentenv report FILE [--json]` | Success rate, mean steps and mean final reward per (task, agent), then per agent over all tasks with the mean action time. |
 | `agentenv validate-tasks [--task <ids\|all>] [--seeds K] [--seed S] [--repeats N] [--json]` | Fail-to-pass check through the real environment: for every task, seed `S..S+K-1` and repeat, the reference solution must reach reward 1.0 within `max_steps`, the empty baseline (one read-only command) must score 0.0 and `reset(seed)` must write a byte-identical workspace. Per-task verdict `pass`, `fail` (every run failed) or `flaky` (mixed); exit 1 on any fail or flake. Default: `all`, 3 seeds, 1 repeat. |
 | `agentenv doctor [--json]` | Toolchain report: python, docker, sandbox backend, model provider; exit 1 on problems. |
 | `agentenv settings` | Effective settings as JSON with secrets masked. |
@@ -187,6 +188,9 @@ data_pipeline        scripted          3     100%       3.00       1.000
 fix_checksum         random            3       0%       6.00       0.000
 fix_checksum         scripted          3     100%       1.00       1.000
 ...
+------------------------------------------------------------------------
+all (10 tasks)       random           30       0%       6.30       0.000  0.005s/action
+all (10 tasks)       scripted         30     100%       1.20       1.000  0.014s/action
 60 episodes, 225 steps
 wrote trajectories.jsonl (3.01s of episodes, 0.050s per episode)
 ```
@@ -216,10 +220,15 @@ uv run agentenv run --task all --agent scripted --agent random --episodes 10 --s
 | rename_files | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.012 s (shell) / 0.004 s |
 | data_pipeline | scripted / random | 10 / 10 | 100% / 0% | 3.0 / 9.0 | 0.019 s (python) / 0.005 s |
 
-Over all ten tasks: scripted 100% success (mean 1.2 steps), random 0% (mean 6.3 steps,
-always the step limit). 200 episodes and 750 steps in 9.42 s of episode time (0.047 s per
-episode including the reward check after every step); 9.6 s wall clock including
-interpreter start-up. `agentenv validate-tasks --seeds 3 --repeats 2` (120 episodes plus
+Per agent over all ten tasks (the `all (10 tasks)` rows of `agentenv report`):
+
+| agent | episodes | success | mean steps | mean reward | mean action time |
+| --- | --- | --- | --- | --- | --- |
+| scripted | 100 | 100% | 1.20 | 1.000 | 0.014 s |
+| random | 100 | 0% | 6.30 (always the step limit) | 0.000 | 0.005 s |
+
+200 episodes and 750 steps in 9.42 s of episode time (0.047 s per episode including the
+reward check after every step); 9.6 s wall clock including interpreter start-up. `agentenv validate-tasks --seeds 3 --repeats 2` (120 episodes plus
 30 digest comparisons) takes 2.9 s wall clock. `make demo` (validation on 3 seeds plus
 60 episodes, five `uv run` invocations) takes 4.8 s wall clock. The test suite
 (`make ci`, upstream and fork tests, 8 workers) takes about 70 s.

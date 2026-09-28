@@ -102,19 +102,40 @@ class GroupReport(BaseModel):
     mean_reward: float
 
 
+class AgentReport(BaseModel):
+    """One agent over every task it ran: the number to compare agents by."""
+
+    agent: str
+    tasks: int
+    episodes: int
+    successes: int
+    success_rate: float
+    mean_steps: float
+    mean_reward: float
+    mean_action_seconds: float
+
+
 class Report(BaseModel):
     steps: int
     episodes: int
     groups: list[GroupReport]
+    agents: list[AgentReport] = Field(default_factory=list)
 
     def render(self) -> str:
-        """Fixed-width table for the terminal."""
+        """Fixed-width table for the terminal: one row per (task, agent), then one per agent over all tasks."""
         header = f"{'task':<20} {'agent':<10} {'episodes':>8} {'success':>8} {'mean_steps':>10} {'mean_reward':>11}"
         lines = [header, "-" * len(header)]
         for g in self.groups:
             lines.append(
                 f"{g.task_id:<20} {g.agent:<10} {g.episodes:>8} {g.success_rate:>8.0%} "
                 f"{g.mean_steps:>10.2f} {g.mean_reward:>11.3f}"
+            )
+        if self.agents:
+            lines.append("-" * len(header))
+        for a in self.agents:
+            lines.append(
+                f"{f'all ({a.tasks} tasks)':<20} {a.agent:<10} {a.episodes:>8} {a.success_rate:>8.0%} "
+                f"{a.mean_steps:>10.2f} {a.mean_reward:>11.3f}  {a.mean_action_seconds:.3f}s/action"
             )
         lines.append(f"{self.episodes} episodes, {self.steps} steps")
         return "\n".join(lines)
@@ -145,4 +166,22 @@ def build_report(steps: Iterable[TrajectoryStep]) -> Report:
                 mean_reward=statistics.fmean(f.reward for f in finals),
             )
         )
-    return Report(steps=total, episodes=len(by_episode), groups=groups)
+    agents = []
+    for agent in sorted({key[1] for key in by_group}):
+        episodes = [e for (_, name), group in by_group.items() if name == agent for e in group]
+        finals = [max(e, key=lambda s: s.step) for e in episodes]
+        durations = [float(s.info.get("duration_seconds", 0.0)) for e in episodes for s in e]
+        successes = sum(any(s.reward >= 1.0 for s in e) for e in episodes)
+        agents.append(
+            AgentReport(
+                agent=agent,
+                tasks=sum(name == agent for _, name in by_group),
+                episodes=len(episodes),
+                successes=successes,
+                success_rate=successes / len(episodes),
+                mean_steps=statistics.fmean(f.step for f in finals),
+                mean_reward=statistics.fmean(f.reward for f in finals),
+                mean_action_seconds=statistics.fmean(durations) if durations else 0.0,
+            )
+        )
+    return Report(steps=total, episodes=len(by_episode), groups=groups, agents=agents)
