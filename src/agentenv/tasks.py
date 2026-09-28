@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import random
 import re
-import secrets
 import statistics
 from collections import Counter
 from collections.abc import Callable
@@ -118,28 +117,39 @@ def _checksum_setup(workspace: Path, seed: int) -> None:
     )
 
 
-def _hidden_tests_pass(sandbox: SubprocessSandbox, code: str) -> bool:
-    """True only when ``code`` runs to its last line with every assertion intact.
+_PROBE_PRELUDE = "import io as _io, json as _json, sys as _sys\n_out = _sys.stdout\n_sys.stdout = _io.StringIO()\n"
+_PROBE_EPILOGUE = "_out.write('\\n' + _json.dumps(observed) + '\\n')\n_out.flush()\n"
 
-    The grader script imports the agent's module first, so a module that exits
-    cleanly at import (``os._exit(0)``) would otherwise skip every assertion and
-    still return 0. A sentinel chosen per call is printed as the final statement
-    and must appear on stdout in addition to the zero exit status.
+
+def _hidden_probe(sandbox: SubprocessSandbox, code: str, expected: Any) -> bool:
+    """True only when the probe ``code`` reports exactly ``expected``.
+
+    The probe imports the agent's module, calls it on the hidden inputs and prints the
+    observed results as one JSON line on its own stdout handle (captured before the import,
+    so a module that prints or swaps ``sys.stdout`` cannot hide it). The expected values
+    stay in this process: they are never in the child's argv, environment or stdin, so a
+    module that exits cleanly at import (``os._exit(0)``) or reads its own command line
+    back has nothing to echo. Any exception, timeout, non-zero exit, truncated or
+    malformed output counts as a failure.
     """
-    sentinel = "AGENTENV_HIDDEN_TESTS_OK_" + secrets.token_hex(16)
-    result = sandbox.python(code + f"print({sentinel!r})\n")
-    return result.ok and sentinel in result.stdout
+    result = sandbox.python(_PROBE_PRELUDE + code + _PROBE_EPILOGUE)
+    if not result.ok:
+        return False
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if not lines:
+        return False
+    try:
+        observed = json.loads(lines[-1])
+    except ValueError:
+        return False
+    return bool(observed == expected)
 
 
 def _checksum_reward(sandbox: SubprocessSandbox, seed: int) -> float:
     modulus, _, cases, _ = _checksum_params(seed)
-    checks = [(values, _checksum_expected(values, modulus)) for values in cases]
-    code = (
-        "from mathlib import weighted_checksum\n"
-        f"for values, expected in {checks!r}:\n"
-        "    assert weighted_checksum(values) == expected, (values, expected)\n"
-    )
-    return 1.0 if _hidden_tests_pass(sandbox, code) else 0.0
+    expected = [_checksum_expected(values, modulus) for values in cases]
+    code = f"from mathlib import weighted_checksum\nobserved = [weighted_checksum(values) for values in {cases!r}]\n"
+    return 1.0 if _hidden_probe(sandbox, code, expected) else 0.0
 
 
 def _checksum_reference(seed: int) -> list[Action]:
@@ -332,13 +342,9 @@ def _slug_setup(workspace: Path, seed: int) -> None:
 
 def _slug_reward(sandbox: SubprocessSandbox, seed: int) -> float:
     limit, _, cases = _slug_params(seed)
-    checks = [(text, _slug_expected(text, limit)) for text in cases]
-    code = (
-        "from textutil import slugify\n"
-        f"for text, expected in {checks!r}:\n"
-        "    assert slugify(text) == expected, (text, expected, slugify(text))\n"
-    )
-    return 1.0 if _hidden_tests_pass(sandbox, code) else 0.0
+    expected = [_slug_expected(text, limit) for text in cases]
+    code = f"from textutil import slugify\nobserved = [slugify(text) for text in {cases!r}]\n"
+    return 1.0 if _hidden_probe(sandbox, code, expected) else 0.0
 
 
 def _slug_reference(seed: int) -> list[Action]:
@@ -373,6 +379,18 @@ def _ring_setup(workspace: Path, seed: int) -> None:
     )
 
 
+def _ring_expected(capacity: int, sequences: list[list[int]]) -> list[Any]:
+    """What the probe must observe: ``ValueError`` for capacity 0, then items and len after every push."""
+    trace: list[Any] = ["ValueError"]
+    for sequence in sequences:
+        steps: list[Any] = [[[], 0]]
+        for index in range(len(sequence)):
+            held = sequence[: index + 1][-capacity:]
+            steps.append([held, len(held)])
+        trace.append(steps)
+    return trace
+
+
 def _ring_reward(sandbox: SubprocessSandbox, seed: int) -> float:
     capacity, sequences = _ring_params(seed)
     code = (
@@ -380,19 +398,21 @@ def _ring_reward(sandbox: SubprocessSandbox, seed: int) -> float:
         "try:\n"
         "    RingBuffer(0)\n"
         "except ValueError:\n"
-        "    pass\n"
+        "    observed = ['ValueError']\n"
         "else:\n"
-        "    raise AssertionError('capacity 0 accepted')\n"
+        "    observed = ['capacity 0 accepted']\n"
+        "def _snapshot(buffer):\n"
+        "    held = buffer.items()\n"
+        "    return [held if isinstance(held, list) else repr(held), len(buffer)]\n"
         f"for sequence in {sequences!r}:\n"
         f"    buffer = RingBuffer({capacity})\n"
-        "    assert len(buffer) == 0 and buffer.items() == []\n"
-        "    for index, item in enumerate(sequence):\n"
+        "    steps = [_snapshot(buffer)]\n"
+        "    for item in sequence:\n"
         "        buffer.push(item)\n"
-        f"        expected = sequence[: index + 1][-{capacity}:]\n"
-        "        assert buffer.items() == expected, (buffer.items(), expected)\n"
-        "        assert len(buffer) == len(expected)\n"
+        "        steps.append(_snapshot(buffer))\n"
+        "    observed.append(steps)\n"
     )
-    return 1.0 if _hidden_tests_pass(sandbox, code) else 0.0
+    return 1.0 if _hidden_probe(sandbox, code, _ring_expected(capacity, sequences)) else 0.0
 
 
 _RING_SOLUTION = '''"""Fixed-capacity FIFO buffer."""

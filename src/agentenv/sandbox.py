@@ -122,8 +122,12 @@ class SubprocessSandbox:
             raise SandboxError(f"cannot write {path!r}: {exc}", details={"path": path}) from exc
         return len(content)
 
-    def run(self, argv: list[str], *, timeout: float | None = None) -> CommandResult:
-        """Run ``argv`` in the workspace with a wall-clock timeout and capped output."""
+    def run(self, argv: list[str], *, timeout: float | None = None, stdin: str | None = None) -> CommandResult:
+        """Run ``argv`` in the workspace with a wall-clock timeout and capped output.
+
+        ``stdin`` is fed to the child's standard input (an empty pipe when ``None``), so
+        the child never inherits the parent's terminal.
+        """
         limit = timeout or self.limits.timeout_seconds
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -138,6 +142,7 @@ class SubprocessSandbox:
                 argv,
                 cwd=self.workspace,
                 env=env,
+                input=stdin if stdin is not None else "",
                 capture_output=True,
                 text=True,
                 errors="replace",
@@ -165,8 +170,12 @@ class SubprocessSandbox:
         return self.run(["bash", "-c", command], timeout=timeout)
 
     def python(self, code: str, *, timeout: float | None = None) -> CommandResult:
-        """Run ``code`` with the interpreter that runs agentenv; the workspace is on ``sys.path``."""
-        return self.run([sys.executable, "-c", code], timeout=timeout)
+        """Run ``code`` with the interpreter that runs agentenv; the workspace is on ``sys.path``.
+
+        The code goes in on stdin (``python -``) rather than ``-c``, so it never appears in
+        the child's argv where anything the code imports could read it back.
+        """
+        return self.run([sys.executable, "-"], timeout=timeout, stdin=code)
 
     def close(self) -> None:
         """Delete the workspace. Safe to call more than once."""

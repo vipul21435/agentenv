@@ -256,6 +256,12 @@ reward check after every step); 9.6 s wall clock including interpreter start-up.
 - Partial credit where it is meaningful (share of matching keys for the JSON tasks,
   Jaccard overlap for the report, one third per pipeline stage), binary for hidden
   tests. The environment clamps rewards to `[0, 1]`.
+- Hidden-test graders keep the answers out of the child. The probe subprocess gets the
+  code on stdin (never argv), imports the agent's module, calls it on the hidden inputs
+  and prints only the observed results as one JSON line; the parent compares that line
+  against expected values it computed itself. A module that exits 0 at import, swaps
+  `sys.stdout`, or reads its own command line back through `/proc` or `ps` has nothing
+  to echo and scores 0.0 (each case is a regression test).
 - The validator is the runtime twin of the task tests. Tests catch a broken task at
   commit time; `validate-tasks --repeats N` catches one that only breaks on some seeds
   or some runs (flaky rewards, timing-dependent graders) in the environment an agent

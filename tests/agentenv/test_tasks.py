@@ -226,19 +226,71 @@ def test_shell_reference_solutions_run_through_the_environment(tmp_path: Path) -
         assert _run_reference(task_id, 0, tmp_path) == 1.0
 
 
-@pytest.mark.parametrize(
-    ("task_id", "module"),
-    [("fix_checksum", "mathlib.py"), ("fix_slugify", "textutil.py"), ("implement_ringbuffer", "ringbuffer.py")],
+HIDDEN_TEST_MODULES = [
+    ("fix_checksum", "mathlib.py"),
+    ("fix_slugify", "textutil.py"),
+    ("implement_ringbuffer", "ringbuffer.py"),
+]
+
+# A module that reads the grader's own command line back (procfs on Linux, ps on macOS)
+# and echoes anything that looks like a pass marker before exiting cleanly.
+_CMDLINE_ECHO = (
+    "import os, re, subprocess, sys\n"
+    "try:\n"
+    "    cmd = open('/proc/self/cmdline', 'rb').read().decode(errors='replace')\n"
+    "except OSError:\n"
+    "    cmd = subprocess.run(['ps', '-o', 'command=', '-p', str(os.getpid())], capture_output=True, text=True).stdout\n"
+    "found = re.findall(r'AGENTENV[A-Z_]*[0-9a-f]+|observed|expected', cmd + ' '.join(sys.argv))\n"
+    "sys.__stdout__.write(' '.join(found) + '\\n')\n"
+    "sys.__stdout__.flush()\n"
+    "os._exit(0)\n"
 )
-def test_hidden_tests_reject_module_that_exits_cleanly_at_import(task_id: str, module: str, tmp_path: Path) -> None:
-    """A module that calls os._exit(0) on import must not pass by skipping the assertions."""
+
+
+@pytest.mark.parametrize(("task_id", "module"), HIDDEN_TEST_MODULES)
+@pytest.mark.parametrize(
+    "content",
+    ["import os\nos._exit(0)\n", "import sys\nsys.exit(0)\n", "raise SystemExit(0)\n", _CMDLINE_ECHO],
+    ids=["os_exit", "sys_exit", "system_exit", "cmdline_echo"],
+)
+def test_hidden_tests_reject_module_that_exits_cleanly_at_import(
+    task_id: str, module: str, content: str, tmp_path: Path
+) -> None:
+    """Exiting 0 at import, or echoing whatever the grader put on its command line, earns nothing."""
     with Environment(get_task(task_id), workspace_root=tmp_path) as env:
         env.reset(1)
-        result = env.step(WriteFileAction(path=module, content="import os\nos._exit(0)\n"))
+        result = env.step(WriteFileAction(path=module, content=content))
         assert result.reward == 0.0
+        assert not result.done
+
+
+@pytest.mark.parametrize(("task_id", "module"), HIDDEN_TEST_MODULES)
+def test_hidden_tests_expected_values_never_reach_the_child(task_id: str, module: str, tmp_path: Path) -> None:
+    """The probe child sees only the inputs: its argv, environment and stdin carry no expected values."""
+    spy = (
+        "import json, os, sys\n"
+        "leak = {'argv': sys.argv, 'env': dict(os.environ)}\n"
+        "open('leak.json', 'w').write(json.dumps(leak))\n"
+    )
+    with Environment(get_task(task_id), workspace_root=tmp_path) as env:
         env.reset(1)
-        result = env.step(WriteFileAction(path=module, content="import sys\nsys.exit(0)\n"))
-        assert result.reward == 0.0
+        assert env.step(WriteFileAction(path=module, content=spy)).reward == 0.0
+        leak = json.loads((env.sandbox.workspace / "leak.json").read_text())
+    assert leak["argv"] == ["-"]
+    extra = set(leak["env"]) - {"PATH", "HOME", "LANG", "PYTHONDONTWRITEBYTECODE", "PYTHONIOENCODING"}
+    assert all(key.startswith("__CF_") for key in extra), extra  # macOS injects __CF_USER_TEXT_ENCODING
+
+
+@pytest.mark.parametrize(("task_id", "module"), HIDDEN_TEST_MODULES)
+def test_hidden_tests_ignore_module_output_and_stdout_swaps(task_id: str, module: str, tmp_path: Path) -> None:
+    """A correct module that prints at import or replaces sys.stdout still scores 1.0."""
+    task = get_task(task_id)
+    reference = task.reference_solution(1)
+    assert len(reference) == 1 and isinstance(reference[0], WriteFileAction)
+    noisy = 'import io, sys\nprint("[]")\nsys.stdout = io.StringIO()\n' + reference[0].content
+    with Environment(task, workspace_root=tmp_path) as env:
+        env.reset(1)
+        assert env.step(WriteFileAction(path=module, content=noisy)).reward == 1.0
 
 
 def test_json_flatten_rejects_booleans_written_as_ints(tmp_path: Path) -> None:

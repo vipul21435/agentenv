@@ -84,3 +84,14 @@ def test_close_is_idempotent(sandbox: SubprocessSandbox) -> None:
     sandbox.close()
     sandbox.close()
     assert not sandbox.workspace.exists()
+
+
+def test_python_feeds_code_on_stdin_not_argv(sandbox: SubprocessSandbox) -> None:
+    result = sandbox.python("import sys; print(sys.argv); print(repr(sys.stdin.read()))")
+    assert result.ok
+    assert result.stdout.splitlines() == ["['-']", "''"]
+
+
+def test_run_passes_stdin_text(sandbox: SubprocessSandbox) -> None:
+    result = sandbox.run(["cat"], stdin="hello\n")
+    assert result.ok and result.stdout == "hello\n"
