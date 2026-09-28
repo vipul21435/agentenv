@@ -1,0 +1,29 @@
+# `docker compose run --rm demo` runs the offline demo without network access.
+services:
+  demo:
+    build: .
+    image: agentenv:dev
+    network_mode: none
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+    tmpfs:
+      - /tmp
+    environment:
+      AGENTENV_LOG_LEVEL: INFO
+    command:
+      - run
+      - --task
+      - all
+      - --agent
+      - scripted
+      - --agent
+      - random
+      - --episodes
+      - "3"
+      - --seed
+      - "0"
+      - --out
+      - /tmp/agentenv/trajectories.jsonl

@@ -51,3 +51,20 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           if-no-files-found: ignore
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t agentenv:dev .
+
+      - name: Run the demo inside the container without network
+        run: docker run --rm --network=none agentenv:dev
+
+      - name: Validate compose file
+        run: docker compose config --quiet
