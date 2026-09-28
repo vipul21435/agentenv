@@ -1,4 +1,4 @@
-"""Command-line interface: ``version``, ``doctor``, ``settings``, ``tasks``, ``run`` and ``report``."""
+"""Command-line interface: ``version``, ``doctor``, ``settings``, ``tasks``, ``run``, ``report`` and ``validate-tasks``."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from agentenv.settings import Settings, load_settings
 from agentenv.tasks import list_tasks
 from agentenv.trajectory import build_report as build_trajectory_report
 from agentenv.trajectory import read_trajectory
+from agentenv.validate import validate_tasks
 
 app = typer.Typer(
     name="agentenv",
@@ -137,6 +138,31 @@ def report(
         typer.echo(json.dumps(exc.to_dict(), default=str), err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
     typer.echo(result.model_dump_json(indent=2) if json_output else result.render())
+
+
+@app.command("validate-tasks")
+def validate_tasks_command(
+    task: Annotated[str, typer.Option("--task", help="Task id, comma-separated ids, or 'all'.")] = "all",
+    seeds: Annotated[int, typer.Option("--seeds", min=1, help="Number of seeds per task, starting at --seed.")] = 3,
+    seed: Annotated[int, typer.Option("--seed", min=0, help="First seed.")] = 0,
+    repeats: Annotated[int, typer.Option("--repeats", min=1, help="Runs per seed; mixed results mean flaky.")] = 1,
+    json_output: Annotated[bool, typer.Option("--json", help="Print the report as JSON.")] = False,
+) -> None:
+    """Fail-to-pass check: reference scores 1.0, empty baseline 0.0, setup is deterministic. Exit 1 on any failure."""
+    settings = _settings()
+    try:
+        result = validate_tasks(
+            select_tasks(task),
+            seeds=range(seed, seed + seeds),
+            repeats=repeats,
+            workspace_root=settings.workspace_root,
+        )
+    except AgentEnvError as exc:
+        typer.echo(json.dumps(exc.to_dict(), default=str), err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    typer.echo(result.model_dump_json(indent=2) if json_output else result.render())
+    if not result.ok:
+        raise typer.Exit(code=EXIT_PROBLEMS)
 
 
 def main() -> None:  # pragma: no cover - exercised through ``python -m agentenv`` in a subprocess
