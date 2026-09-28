@@ -68,6 +68,7 @@ Upstream = "https://github.com/SWE-agent/mini-swe-agent"
 "Bug Tracker" = "https://github.com/vipul21435/agentenv/issues"
 
 [project.scripts]
+agentenv = "agentenv.cli:app"
 mini = "minisweagent.run.mini:app"
 mini-swe-agent = "minisweagent.run.mini:app"
 mini-extra = "minisweagent.run.utilities.mini_extra:main"

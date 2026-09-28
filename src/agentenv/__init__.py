@@ -13,6 +13,7 @@ from agentenv.errors import (
     SandboxTimeoutError,
     TaskError,
 )
+from agentenv.settings import Settings, get_settings, load_settings
 
 __version__ = "0.1.0"
 
@@ -22,6 +23,9 @@ __all__ = [
     "EpisodeError",
     "SandboxError",
     "SandboxTimeoutError",
+    "Settings",
     "TaskError",
     "__version__",
+    "get_settings",
+    "load_settings",
 ]
