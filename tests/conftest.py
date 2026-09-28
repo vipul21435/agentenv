@@ -1,10 +1,14 @@
 import json
+import os
 import re
 import subprocess
 import threading
 from pathlib import Path
 
 import pytest
+
+# Keep the upstream startup banner out of test output.
+os.environ.setdefault("MSWEA_SILENT_STARTUP", "1")
 
 from minisweagent.models import GLOBAL_MODEL_STATS
 
@@ -32,12 +36,12 @@ def reset_global_stats():
     """
     with _global_stats_lock:
         # Reset at start
-        GLOBAL_MODEL_STATS._cost = 0.0  # noqa: protected-access
-        GLOBAL_MODEL_STATS._n_calls = 0  # noqa: protected-access
+        GLOBAL_MODEL_STATS._cost = 0.0
+        GLOBAL_MODEL_STATS._n_calls = 0
         yield
         # Reset at end to clean up
-        GLOBAL_MODEL_STATS._cost = 0.0  # noqa: protected-access
-        GLOBAL_MODEL_STATS._n_calls = 0  # noqa: protected-access
+        GLOBAL_MODEL_STATS._cost = 0.0
+        GLOBAL_MODEL_STATS._n_calls = 0
 
 
 def _get_container_executable() -> str | None:

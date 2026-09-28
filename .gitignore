@@ -1,5 +1,4 @@
 .cursor/rules/_*
-uv.lock
 patch.txt
 exit_statuses*.yaml
 preds.json
@@ -186,3 +185,12 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+
+# agentenv
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+runs/
+trajectories/

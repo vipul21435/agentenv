@@ -6,6 +6,10 @@ import pytest
 
 from minisweagent.environments.docker import DockerEnvironment, DockerEnvironmentConfig
 
+# Every test in this module needs a container runtime; the parametrised skipif below
+# skips cleanly when neither docker nor podman is available.
+pytestmark = pytest.mark.docker
+
 
 def is_docker_available():
     """Check if Docker is available and running."""
