@@ -6,8 +6,10 @@ A gym-style environment for tool-using LLM agents with verifiable rewards.
 `reset(seed)` hands an agent a seeded task inside a fresh sandbox workspace, `step(action)`
 runs one tool call (`shell`, `read_file`, `write_file` or `python`) and returns an
 observation, a reward in `[0, 1]` from the task's reward function and a `done` flag, and
-every step is appended to a JSONL trajectory. Built for a laptop: no GPU, no API key, no
-network, deterministic episodes.
+every step is appended to a JSONL trajectory. Ten original seeded tasks ship with reference
+solutions, and `agentenv validate-tasks` proves each one is fail-to-pass (reference 1.0,
+untouched workspace 0.0, deterministic setup) through the real environment. Built for a
+laptop: no GPU, no API key, no network, deterministic episodes.
 
 Upstream mini-swe-agent (MIT) ships unchanged in `src/minisweagent`; all fork work is in
 `src/agentenv` and `tests/agentenv`.
@@ -28,7 +30,7 @@ Cross-checked against `git log --author=vipul21435@iiitd.ac.in --oneline`.
   subprocesses with a wall-clock timeout, output caps and path confinement),
   `agentenv.actions` (discriminated union of the four action kinds), `agentenv.env`
   (`Environment.reset` / `Environment.step`, graded after every step, ends on reward 1.0
-  or `max_steps`), `agentenv.tasks` (pydantic `Task` model and three original seeded
+  or `max_steps`), `agentenv.tasks` (pydantic `Task` model and the first three seeded
   tasks with reference solutions).
 - Agents, trajectories and CLI: `ScriptedAgent` (replays the reference solution) and
   `RandomAgent` (seeded random actions), a flushed JSONL `TrajectoryWriter`, a reader with
@@ -36,6 +38,13 @@ Cross-checked against `git log --author=vipul21435@iiitd.ac.in --oneline`.
   `agentenv tasks | run | report`.
 - `make demo`, a digest-pinned non-root `Dockerfile`, `docker-compose.yml` (no network,
   CPU and memory limits) and this README.
+- Task suite and validator: seven more original tasks (buggy function vs hidden tests,
+  module from a docstring spec, CSV and JSON transforms, two shell tasks, a three-step
+  pipeline with one third credit per step) for ten in total, and
+  `agentenv validate-tasks [--seeds K] [--repeats N]` (`agentenv.validate`), the
+  fail-to-pass check that runs every task's reference solution and empty baseline through
+  the real `Environment`, compares setup digests across repeats and reports
+  pass/fail/flaky per task with exit code 1 on any failure.
 
 ## Architecture
 
@@ -46,6 +55,8 @@ flowchart LR
     Agent -- "Action" --> Env["Environment<br/>reset(seed) / step(action)"]
     Env -- "Observation, reward, done" --> Agent
     Env --> Task["Task<br/>setup(seed) / reward / reference_solution"]
+    Validate["validate.validate_tasks<br/>reference 1.0 / baseline 0.0 / setup digest"] --> Env
+    CLI --> Validate
     Env --> Sandbox["SubprocessSandbox<br/>temp workspace, timeout, output caps"]
     Task --> Sandbox
     Runner -- "one JSON line per step" --> JSONL["trajectories.jsonl"]
@@ -67,8 +78,8 @@ uv run agentenv report trajectories.jsonl
 make ci
 ```
 
-`make demo` runs the scripted and random agents over every task for 3 seeds, writes
-`trajectories.jsonl` and prints the success-rate table. `make ci` is what GitHub Actions
+`make demo` validates all ten tasks on 3 seeds, runs the scripted and random agents over
+every task for 3 seeds, writes `trajectories.jsonl` and prints the success-rate table. `make ci` is what GitHub Actions
 runs: ruff, ruff format check, mypy, pytest with coverage.
 
 With Docker: `docker build -t agentenv:dev . && docker run --rm --network=none agentenv:dev`
@@ -81,12 +92,13 @@ runs the same demo as a non-root user inside `python:3.12-slim`, or `docker comp
 | `agentenv tasks` | List the built-in tasks with `max_steps` and a one-line description. |
 | `agentenv run --task <id,id\|all> --agent scripted --agent random --episodes N --seed S --out FILE` | Run every named agent on every selected task for `N` episodes (seeds `S`..`S+N-1`), write one JSON line per step to `FILE` and print the report. Default: `all`, `scripted`, 1 episode, seed 0, `trajectories.jsonl`. |
 | `agentenv report FILE [--json]` | Success rate, mean steps and mean final reward per (task, agent). |
+| `agentenv validate-tasks [--task <ids\|all>] [--seeds K] [--seed S] [--repeats N] [--json]` | Fail-to-pass check through the real environment: for every task, seed `S..S+K-1` and repeat, the reference solution must reach reward 1.0 within `max_steps`, the empty baseline (one read-only command) must score 0.0 and `reset(seed)` must write a byte-identical workspace. Per-task verdict `pass`, `fail` (every run failed) or `flaky` (mixed); exit 1 on any fail or flake. Default: `all`, 3 seeds, 1 repeat. |
 | `agentenv doctor [--json]` | Toolchain report: python, docker, sandbox backend, model provider; exit 1 on problems. |
 | `agentenv settings` | Effective settings as JSON with secrets masked. |
 | `agentenv version` | Version string. |
 
-Exit codes: 0 ok, 1 doctor found problems, 2 invalid configuration or arguments (the
-error is printed as JSON with a stable `code`).
+Exit codes: 0 ok, 1 doctor found problems or a task failed validation, 2 invalid
+configuration or arguments (the error is printed as JSON with a stable `code`).
 
 ## Python API
 
@@ -112,18 +124,31 @@ with Environment(get_task("parse_log")) as env:
   `PythonAction(code)`; `parse_action(dict)` validates JSON input.
 - `Task(id, description, max_steps, setup, reward, reference_solution)`; `get_task(id)`,
   `list_tasks()`.
+- `validate_tasks(tasks, seeds=[0, 1, 2], repeats=1) -> ValidationReport` with `.ok`,
+  `.counts()`, `.render()` and per-task `TaskVerdict(verdict, checks, runs)`;
+  `validate_task(task, ...)` for one task.
 
 ### Built-in tasks
 
 | id | Seeded setup | Reward |
 | --- | --- | --- |
 | `fix_checksum` | `mathlib.py` with a buggy `weighted_checksum` (seeded modulus and one of three bug variants), `TASK.md` with the spec and two worked examples | 1.0 when five hidden seeded test cases pass in a subprocess, else 0.0 |
+| `fix_slugify` | `textutil.py` with a buggy `slugify` (seeded length limit, one of three bugs: no lowercase, `_` separator, no strip), `TASK.md` with a worked example | 1.0 when five hidden seeded inputs match, else 0.0 |
+| `implement_ringbuffer` | `TASK.md` only: spec for `ringbuffer.RingBuffer(capacity)` with `push`, `items`, `len` and `ValueError` on `capacity < 1`; seeded capacity 3-8 | 1.0 when hidden tests over three seeded push sequences pass, else 0.0 |
 | `summarize_numbers` | `numbers.txt` with 20-40 seeded integers | share of `count`, `sum`, `min`, `max`, `mean` in `stats.json` that match (mean within 1e-3) |
+| `csv_totals` | `orders.csv` (15-30 seeded rows, 3-5 customers, `paid`/`refunded`/`pending`) | share of customers whose paid total in `totals.json` matches within half a cent |
+| `json_flatten` | `config.json`: 3-5 seeded sections, 2-4 keys each, optional nested `limits` block | share of dotted leaf paths whose value in `flat.json` matches |
 | `parse_log` | `app.log` with 30-60 seeded `<timestamp> <LEVEL> <service>: <message>` lines | share of `lines`, `by_level`, `services`, `errors_by_service` in `summary.json` that match |
+| `grep_report` | 8-14 seeded files under `src/*` and `docs/`, some with `TODO` lines | Jaccard overlap between the `path:count` lines of `report.txt` and the expected set |
+| `rename_files` | `incoming/` with 6-12 seeded `.tmp`, `.txt` and `.log` files | (`.dat` files with the original content + 1 if no `.tmp` remains) / (`.tmp` count + 1) |
+| `data_pipeline` | `raw/part_<n>.csv` (3-5 parts, 4-8 rows each, some negative or `n/a` values), `max_steps` 9 | one third each for `merged.csv` (exact rows), `clean.csv` (exact rows) and `summary.json` (share of matching keys) |
 
 Every task is checked in `tests/agentenv/test_tasks.py` on four seeds: the reference
 solution scores 1.0, the untouched workspace scores 0.0, and setup is byte-identical for
-the same seed and different across seeds.
+the same seed and different across seeds. `agentenv validate-tasks` repeats the same
+check at runtime through the real environment (`tests/agentenv/test_validate.py` proves
+it catches a broken reference, a reward that is too easy, a flaky reward and a
+non-deterministic setup).
 
 ### Trajectory format
 
@@ -137,20 +162,37 @@ One JSON object per line:
 
 ## Sample output
 
-`make demo` on this machine:
+`make demo` on this machine (4.8 s wall clock):
 
 ```
+task                  reference  baseline     setup  verdict
+------------------------------------------------------------
+fix_checksum                3/3       3/3       3/3  pass
+summarize_numbers           3/3       3/3       3/3  pass
+parse_log                   3/3       3/3       3/3  pass
+fix_slugify                 3/3       3/3       3/3  pass
+implement_ringbuffer        3/3       3/3       3/3  pass
+csv_totals                  3/3       3/3       3/3  pass
+json_flatten                3/3       3/3       3/3  pass
+grep_report                 3/3       3/3       3/3  pass
+rename_files                3/3       3/3       3/3  pass
+data_pipeline               3/3       3/3       3/3  pass
+10 tasks, 3 seeds x 1 repeats: 10 pass, 0 fail, 0 flaky
 task                 agent      episodes  success mean_steps mean_reward
 ------------------------------------------------------------------------
+csv_totals           random            3       0%       6.00       0.000
+csv_totals           scripted          3     100%       1.00       1.000
+data_pipeline        random            3       0%       9.00       0.000
+data_pipeline        scripted          3     100%       3.00       1.000
 fix_checksum         random            3       0%       6.00       0.000
 fix_checksum         scripted          3     100%       1.00       1.000
-parse_log            random            3       0%       6.00       0.000
-parse_log            scripted          3     100%       1.00       1.000
-summarize_numbers    random            3       0%       6.00       0.000
-summarize_numbers    scripted          3     100%       1.00       1.000
-18 episodes, 63 steps
-wrote trajectories.jsonl (0.87s of episodes, 0.049s per episode)
+...
+60 episodes, 225 steps
+wrote trajectories.jsonl (3.01s of episodes, 0.050s per episode)
 ```
+
+A failing task prints the reason under its row, for example
+`reference seed=0 repeat=0: reference ended with reward 0.000 after 1 of 2 actions`.
 
 ## Benchmarks
 
@@ -163,17 +205,24 @@ uv run agentenv run --task all --agent scripted --agent random --episodes 10 --s
 
 | task | agent | episodes | success | mean steps | mean action time |
 | --- | --- | --- | --- | --- | --- |
-| fix_checksum | scripted | 10 | 100% | 1.0 | 0.000 s (write_file) |
-| fix_checksum | random | 10 | 0% | 6.0 | 0.006 s |
-| parse_log | scripted | 10 | 100% | 1.0 | 0.021 s (python) |
-| parse_log | random | 10 | 0% | 6.0 | 0.004 s |
-| summarize_numbers | scripted | 10 | 100% | 1.0 | 0.021 s (python) |
-| summarize_numbers | random | 10 | 0% | 6.0 | 0.005 s |
+| fix_checksum | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.000 s (write_file) / 0.006 s |
+| fix_slugify | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.000 s (write_file) / 0.006 s |
+| implement_ringbuffer | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.000 s (write_file) / 0.007 s |
+| summarize_numbers | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.022 s (python) / 0.005 s |
+| csv_totals | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.023 s (python) / 0.005 s |
+| json_flatten | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.021 s (python) / 0.006 s |
+| parse_log | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.022 s (python) / 0.005 s |
+| grep_report | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.006 s (shell) / 0.004 s |
+| rename_files | scripted / random | 10 / 10 | 100% / 0% | 1.0 / 6.0 | 0.012 s (shell) / 0.004 s |
+| data_pipeline | scripted / random | 10 / 10 | 100% / 0% | 3.0 / 9.0 | 0.019 s (python) / 0.005 s |
 
-60 episodes and 210 steps in 2.68 s of episode time (0.045 s per episode including the
-reward check after every step); 2.96 s wall clock including interpreter start-up.
-`make demo` (18 episodes, four `uv run` invocations) takes 2.2 s wall clock. The test
-suite (`make ci`, upstream and fork tests, 8 workers) takes about 70 s.
+Over all ten tasks: scripted 100% success (mean 1.2 steps), random 0% (mean 6.3 steps,
+always the step limit). 200 episodes and 750 steps in 9.42 s of episode time (0.047 s per
+episode including the reward check after every step); 9.6 s wall clock including
+interpreter start-up. `agentenv validate-tasks --seeds 3 --repeats 2` (120 episodes plus
+30 digest comparisons) takes 2.9 s wall clock. `make demo` (validation on 3 seeds plus
+60 episodes, five `uv run` invocations) takes 4.8 s wall clock. The test suite
+(`make ci`, upstream and fork tests, 8 workers) takes about 70 s.
 
 ## Design decisions and tradeoffs
 
@@ -194,8 +243,13 @@ suite (`make ci`, upstream and fork tests, 8 workers) takes about 70 s.
 - Seeds derive parameters with `random.Random(f"{task_id}:{seed}")`, so the same seed
   gives byte-identical workspaces across processes and machines, and tasks never share a
   random stream.
-- Partial credit where it is meaningful (share of matching keys for the JSON tasks),
-  binary for hidden tests. The environment clamps rewards to `[0, 1]`.
+- Partial credit where it is meaningful (share of matching keys for the JSON tasks,
+  Jaccard overlap for the report, one third per pipeline stage), binary for hidden
+  tests. The environment clamps rewards to `[0, 1]`.
+- The validator is the runtime twin of the task tests. Tests catch a broken task at
+  commit time; `validate-tasks --repeats N` catches one that only breaks on some seeds
+  or some runs (flaky rewards, timing-dependent graders) in the environment an agent
+  will actually see, and it is what `make demo` runs first.
 - Errors inside an action (path escape, missing file) become observations with
   `returncode 1` and an `info["error"]` code instead of exceptions, because an agent
   should see its mistakes; protocol errors (`step()` before `reset()`) raise
@@ -208,7 +262,7 @@ suite (`make ci`, upstream and fork tests, 8 workers) takes about 70 s.
 
 ```
 src/minisweagent/   upstream mini-swe-agent (unchanged apart from ruff formatting)
-src/agentenv/       actions, agents, cli, doctor, env, errors, logs, runner, sandbox, settings, tasks, trajectory
+src/agentenv/       actions, agents, cli, doctor, env, errors, logs, runner, sandbox, settings, tasks, trajectory, validate
 tests/agentenv/     fork tests (unit, CLI, subprocess integration)
 tests/...           upstream test suite (kept green)
 Dockerfile, docker-compose.yml, Makefile, .github/workflows/ci.yml
@@ -218,13 +272,11 @@ Dockerfile, docker-compose.yml, Makefile, .github/workflows/ci.yml
 
 1. Docker sandbox backend on the upstream executor: `--network=none`, CPU, memory and
    pids limits, read-only root with a writable workspace mount.
-2. A 10+ task suite with a validator that checks every task the way the tests do now
-   (reference 1.0, empty 0.0, determinism) and reports task difficulty from the random
-   floor.
-3. An OpenAI-compatible LLM agent that emits `parse_action` JSON, using the existing
+2. An OpenAI-compatible LLM agent that emits `parse_action` JSON, using the existing
    `AGENTENV_MODEL_PROVIDER` / `OPENAI_BASE_URL` settings so a local server works.
-4. A FastAPI service exposing `reset` / `step` over HTTP for remote trainers.
-5. Richer reports: per-step reward curves, action-kind histograms, failure taxonomies.
+3. A FastAPI service exposing `reset` / `step` over HTTP for remote trainers.
+4. Richer reports: per-step reward curves, action-kind histograms, failure taxonomies,
+   and a difficulty score per task from the random floor and the step count.
 
 ## License
 

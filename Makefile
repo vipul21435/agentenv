@@ -29,12 +29,13 @@ test-all:
 ci: lint typecheck
 	$(UV) run pytest -q -n auto --cov --cov-report=term-missing --cov-report=xml
 
-# Demo: scripted and random agents over every task for 3 seeds, JSONL trajectory
-# plus the success-rate table. Offline, well under a minute.
+# Demo: validate every task (fail-to-pass check), then scripted and random agents over
+# every task for 3 seeds, JSONL trajectory plus the success-rate table. Offline, seconds.
 DEMO_OUT ?= trajectories.jsonl
 demo:
 	$(UV) run agentenv version
 	$(UV) run agentenv tasks
+	$(UV) run agentenv validate-tasks --seeds 3
 	$(UV) run agentenv run --task all --agent scripted --agent random --episodes 3 --seed 0 --out $(DEMO_OUT)
 	$(UV) run agentenv report $(DEMO_OUT)
 
