@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -101,3 +102,52 @@ def test_python_module_entry_point() -> None:
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == f"agentenv {__version__}"
+
+
+def test_tasks_command_lists_the_suite() -> None:
+    result = runner.invoke(app, ["tasks"])
+    assert result.exit_code == 0
+    assert [line.split()[0] for line in result.stdout.splitlines()] == [
+        "fix_checksum",
+        "summarize_numbers",
+        "parse_log",
+    ]
+
+
+def test_run_and_report_commands(tmp_path: Path) -> None:
+    out = tmp_path / "t.jsonl"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--task",
+            "parse_log",
+            "--agent",
+            "scripted",
+            "--agent",
+            "random",
+            "--episodes",
+            "2",
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "parse_log            scripted          2     100%" in result.stdout
+    assert "parse_log            random            2       0%" in result.stdout
+    assert "per episode" in result.stdout
+    report = runner.invoke(app, ["report", str(out), "--json"])
+    assert report.exit_code == 0
+    assert json.loads(report.stdout)["episodes"] == 4
+
+
+def test_run_rejects_unknown_task(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["run", "--task", "nope", "--out", str(tmp_path / "t.jsonl")])
+    assert result.exit_code == 2
+    assert "unknown task" in result.output
+
+
+def test_report_rejects_missing_file(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["report", str(tmp_path / "missing.jsonl")])
+    assert result.exit_code == 2
+    assert "no such trajectory file" in result.output
