@@ -29,11 +29,14 @@ test-all:
 ci: lint typecheck
 	$(UV) run pytest -q -n auto --cov --cov-report=term-missing --cov-report=xml
 
-# Smoke demo: check the local toolchain and print the effective settings.
+# Demo: scripted and random agents over every task for 3 seeds, JSONL trajectory
+# plus the success-rate table. Offline, well under a minute.
+DEMO_OUT ?= trajectories.jsonl
 demo:
 	$(UV) run agentenv version
-	$(UV) run agentenv doctor
-	$(UV) run agentenv settings
+	$(UV) run agentenv tasks
+	$(UV) run agentenv run --task all --agent scripted --agent random --episodes 3 --seed 0 --out $(DEMO_OUT)
+	$(UV) run agentenv report $(DEMO_OUT)
 
 clean:
-	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage coverage.xml htmlcov
+	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage coverage.xml htmlcov trajectories.jsonl
