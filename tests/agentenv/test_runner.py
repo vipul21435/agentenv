@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agentenv.agents import RandomAgent, ScriptedAgent
 from agentenv.env import Environment
+from agentenv.errors import TaskError
 from agentenv.runner import run_episode, run_suite, select_tasks
 from agentenv.tasks import TASKS, get_task
 from agentenv.trajectory import TrajectoryWriter, build_report, read_trajectory
@@ -37,6 +40,10 @@ def test_random_episode_runs_to_max_steps_and_logs_each_step(tmp_path: Path) -> 
 def test_select_tasks() -> None:
     assert [t.id for t in select_tasks("all")] == list(TASKS)
     assert [t.id for t in select_tasks("parse_log, fix_checksum")] == ["parse_log", "fix_checksum"]
+    assert [t.id for t in select_tasks("parse_log,parse_log, fix_checksum")] == ["parse_log", "fix_checksum"]
+    for empty in ("", " , "):
+        with pytest.raises(TaskError):
+            select_tasks(empty)
 
 
 def test_run_suite_writes_a_reportable_trajectory(tmp_path: Path) -> None:

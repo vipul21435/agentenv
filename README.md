@@ -141,7 +141,7 @@ with Environment(get_task("parse_log")) as env:
 | `json_flatten` | `config.json`: 3-5 seeded sections, 2-4 keys each, optional nested `limits` block | share of dotted leaf paths whose value in `flat.json` matches |
 | `parse_log` | `app.log` with 30-60 seeded `<timestamp> <LEVEL> <service>: <message>` lines | share of `lines`, `by_level`, `services`, `errors_by_service` in `summary.json` that match |
 | `grep_report` | 8-14 seeded files under `src/*` and `docs/`, some with `TODO` lines | Jaccard overlap between the `path:count` lines of `report.txt` and the expected set |
-| `rename_files` | `incoming/` with 6-12 seeded `.tmp`, `.txt` and `.log` files | (`.dat` files with the original content + 1 if no `.tmp` remains) / (`.tmp` count + 1) |
+| `rename_files` | `incoming/` with 6-12 seeded `.tmp`, `.txt` and `.log` files | (`.dat` files with the original content + 1 if no `.tmp` remains, paid only once at least one file was renamed) / (`.tmp` count + 1) |
 | `data_pipeline` | `raw/part_<n>.csv` (3-5 parts, 4-8 rows each, some negative or `n/a` values), `max_steps` 9 | one third each for `merged.csv` (exact rows), `clean.csv` (exact rows) and `summary.json` (share of matching keys) |
 
 Every task is checked in `tests/agentenv/test_tasks.py` on four seeds: the reference

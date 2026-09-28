@@ -59,7 +59,7 @@ class ValidationReport(BaseModel):
 
     @property
     def ok(self) -> bool:
-        return all(task.verdict == "pass" for task in self.tasks)
+        return bool(self.tasks) and all(task.verdict == "pass" for task in self.tasks)
 
     def counts(self) -> dict[Verdict, int]:
         return {verdict: sum(task.verdict == verdict for task in self.tasks) for verdict in ("pass", "fail", "flaky")}

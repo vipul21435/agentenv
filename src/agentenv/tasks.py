@@ -64,7 +64,10 @@ def _fraction_matching(actual: Any, expected: dict[str, Any], *, tolerance: floa
     hits = 0
     for key, want in expected.items():
         got = actual.get(key)
-        if isinstance(want, float) and isinstance(got, int | float) and not isinstance(got, bool):
+        if isinstance(want, bool) or isinstance(got, bool):
+            # True == 1 in Python; a boolean leaf must stay a boolean (and an int must not become one)
+            hits += isinstance(got, bool) and isinstance(want, bool) and got == want
+        elif isinstance(want, float) and isinstance(got, int | float):
             hits += abs(float(got) - want) <= tolerance
         else:
             hits += got == want
@@ -645,7 +648,8 @@ def _rename_reward(sandbox: SubprocessSandbox, seed: int) -> float:
     for name in tmp_names:
         target = folder / (name[: -len(".tmp")] + ".dat")
         renamed += target.is_file() and target.read_text() == files[name]
-    none_left = folder.is_dir() and not any(folder.glob("*.tmp"))
+    # the clean-up term is only paid once at least one file was renamed, so deleting beats nothing
+    none_left = renamed > 0 and folder.is_dir() and not any(folder.glob("*.tmp"))
     return (renamed + none_left) / (len(tmp_names) + 1)
 
 

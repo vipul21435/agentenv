@@ -10,7 +10,7 @@ import pytest
 from agentenv.env import Environment, PythonAction, ShellAction, WriteFileAction
 from agentenv.errors import TaskError
 from agentenv.sandbox import SubprocessSandbox
-from agentenv.tasks import _SLUG_BUGS, TASKS, get_task, list_tasks
+from agentenv.tasks import _SLUG_BUGS, TASKS, _config, _flatten, get_task, list_tasks
 
 SEEDS = [0, 1, 2, 42]
 TASK_IDS = [
@@ -239,3 +239,20 @@ def test_hidden_tests_reject_module_that_exits_cleanly_at_import(task_id: str, m
         env.reset(1)
         result = env.step(WriteFileAction(path=module, content="import sys\nsys.exit(0)\n"))
         assert result.reward == 0.0
+
+
+def test_json_flatten_rejects_booleans_written_as_ints(tmp_path: Path) -> None:
+    flat = _flatten(_config(0))
+    bools = sum(isinstance(value, bool) for value in flat.values())
+    assert bools >= 1
+    bogus = {key: (int(value) if isinstance(value, bool) else value) for key, value in flat.items()}
+    with Environment(get_task("json_flatten"), workspace_root=tmp_path) as env:
+        env.reset(0)
+        reward = env.step(WriteFileAction(path="flat.json", content=json.dumps(bogus))).reward
+    assert reward == pytest.approx((len(flat) - bools) / len(flat))
+
+
+def test_rename_files_pays_nothing_for_deleting(tmp_path: Path) -> None:
+    with Environment(get_task("rename_files"), workspace_root=tmp_path) as env:
+        env.reset(0)
+        assert env.step(ShellAction(command="rm incoming/*.tmp")).reward == 0.0

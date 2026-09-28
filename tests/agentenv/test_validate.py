@@ -12,7 +12,7 @@ from agentenv.actions import Action, ShellAction, WriteFileAction
 from agentenv.cli import EXIT_CONFIG, EXIT_PROBLEMS, app
 from agentenv.sandbox import SubprocessSandbox
 from agentenv.tasks import Task, get_task, list_tasks
-from agentenv.validate import validate_task, validate_tasks, workspace_digest
+from agentenv.validate import ValidationReport, validate_task, validate_tasks, workspace_digest
 
 runner = CliRunner()
 
@@ -176,3 +176,7 @@ def test_cli_validate_tasks_exit_codes(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(app, ["validate-tasks", "--seeds", "1"])
     assert result.exit_code == EXIT_PROBLEMS
     assert "fix_checksum                0/1       1/1       1/1  fail" in result.stdout
+
+
+def test_report_with_no_tasks_is_not_ok() -> None:
+    assert ValidationReport(seeds=[0], repeats=1, tasks=[]).ok is False

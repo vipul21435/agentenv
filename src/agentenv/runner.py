@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from agentenv.agents import Agent, make_agent
 from agentenv.env import Environment
+from agentenv.errors import TaskError
 from agentenv.logs import get_logger, log_event
 from agentenv.sandbox import SandboxLimits
 from agentenv.tasks import Task, get_task, list_tasks
@@ -70,10 +71,13 @@ def run_episode(
 
 
 def select_tasks(spec: str) -> list[Task]:
-    """``all`` or a comma-separated list of task ids."""
+    """``all`` or a comma-separated list of task ids; duplicates are dropped, an empty selection is a TaskError."""
     if spec.strip() == "all":
         return list_tasks()
-    return [get_task(part.strip()) for part in spec.split(",") if part.strip()]
+    ids = list(dict.fromkeys(part.strip() for part in spec.split(",") if part.strip()))
+    if not ids:
+        raise TaskError("no tasks selected", details={"spec": spec})
+    return [get_task(task_id) for task_id in ids]
 
 
 def run_suite(
