@@ -81,7 +81,10 @@ make ci
 
 `make demo` validates all ten tasks on 3 seeds, runs the scripted and random agents over
 every task for 3 seeds, writes `trajectories.jsonl` and prints the success-rate table. `make ci` is what GitHub Actions
-runs: ruff, ruff format check, mypy, pytest with coverage.
+runs: ruff, ruff format check, mypy, pytest with coverage. It includes the upstream suite, which
+starts real containers with 3 s timeouts and spawns CLI subprocesses under 10 s limits, so run it on
+an idle machine with the Docker daemon up (a concurrent `docker build` can make one or two of those
+tests time out; they pass on re-run). `make test` runs everything except the `slow` tests.
 
 With Docker: `docker build -t agentenv:dev . && docker run --rm --network=none agentenv:dev`
 runs the same demo as a non-root user inside `python:3.12-slim`, or `docker compose run --rm demo`.
