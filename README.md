@@ -2,6 +2,8 @@ Forked from https://github.com/SWE-agent/mini-swe-agent.
 
 # AgentEnv
 
+[![CI](https://github.com/vipul21435/agentenv/actions/workflows/ci.yml/badge.svg)](https://github.com/vipul21435/agentenv/actions/workflows/ci.yml)
+
 A gym-style environment for tool-using LLM agents with verifiable rewards.
 `reset(seed)` hands an agent a seeded task inside a fresh sandbox workspace, `step(action)`
 runs one tool call (`shell`, `read_file`, `write_file` or `python`) and returns an
@@ -296,6 +298,16 @@ Dockerfile, docker-compose.yml, Makefile, .github/workflows/ci.yml
 3. A FastAPI service exposing `reset` / `step` over HTTP for remote trainers.
 4. Richer reports: per-step reward curves, action-kind histograms, failure taxonomies,
    and a difficulty score per task from the random floor and the step count.
+
+## Related tools
+
+- [trajlens](https://github.com/vipul21435/trajlens): read coding-agent trajectories, measure behaviour, classify failures.
+- [graderguard](https://github.com/vipul21435/graderguard): audit the grader of a benchmark task for AI coding agents for reward hacking before the task ships.
+- [evalstats](https://github.com/vipul21435/evalstats): error bars, paired comparisons and sample-size planning for model evaluations scored per item.
+- [verifybench](https://github.com/vipul21435/verifybench): an evaluation harness for LLM-generated code, built on human-eval.
+- [taskgate](https://github.com/vipul21435/taskgate): review gates for pull requests that add or change benchmark tasks for AI coding agents.
+
+The full list is on the author's profile: https://github.com/vipul21435
 
 ## License
 
